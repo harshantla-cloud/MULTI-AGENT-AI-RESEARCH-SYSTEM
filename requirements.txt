@@ -1,0 +1,51 @@
+# ==============================
+# LANGCHAIN CORE
+# ==============================
+langchain
+langchain-core
+langchain-community
+
+# ==============================
+# GOOGLE GEMINI
+# ==============================
+langchain-google-genai
+google-generativeai
+
+# ==============================
+# AGENTS / REACT / ORCHESTRATION
+# ==============================
+langgraph
+
+# ==============================
+# WEB SEARCH - TAVILY
+# ==============================
+tavily-python
+langchain-tavily
+
+# ==============================
+# WEB SCRAPING - BEAUTIFULSOUP
+# ==============================
+beautifulsoup4
+requests
+lxml
+
+# ==============================
+# ENVIRONMENT VARIABLES
+# ==============================
+python-dotenv
+
+
+# ==============================
+# API / HTTP
+# ==============================
+httpx
+
+# ==============================
+# UI
+# ==============================
+streamlit
+
+# ==============================
+# OPTIONAL: LANGCHAIN MONITORING
+# ==============================
+langsmith
