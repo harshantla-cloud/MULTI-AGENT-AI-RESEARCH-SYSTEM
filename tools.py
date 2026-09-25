@@ -7,11 +7,8 @@ from langchain.tools import tool
 from tavily import TavilyClient
 
 
-# Load environment variables from .env
 load_dotenv()
 
-
-# Initialize Tavily client using the API key from .env
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 if not TAVILY_API_KEY:
@@ -20,10 +17,10 @@ if not TAVILY_API_KEY:
 tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 
-# Search the web using Tavily
+# Search multiple sources using Tavily
 @tool
 def web_search(query: str) -> str:
-    """Search the web and return relevant titles, URLs and snippets."""
+    """Search the web and return multiple relevant sources."""
 
     results = tavily.search(
         query=query,
@@ -31,65 +28,93 @@ def web_search(query: str) -> str:
     )
 
     output = []
+    seen_urls = set()
 
-    for result in results.get("results", []):
-        title = result.get("title", "No title available")
-        url = result.get("url", "No URL available")
+    for i, result in enumerate(
+        results.get("results", []),
+        start=1
+    ):
+        title = result.get("title", "No title")
+        url = result.get("url", "")
         content = result.get("content", "")
 
+        if not url or url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+
         output.append(
+            f"SOURCE_{i}\n"
             f"Title: {title}\n"
             f"URL: {url}\n"
-            f"Snippet: {content[:300]}"
+            f"Snippet: {content[:400]}"
         )
 
     if not output:
         return "No search results found."
 
-    return "\n--------------------\n".join(output)
+    return "\n\n--------------------\n\n".join(output)
 
 
-# Scrape and extract readable text from a webpage
+# Scrape multiple research sources
 @tool
-def scrape_url(url: str) -> str:
-    """Scrape a webpage and return clean text content."""
+def scrape_multiple_urls(urls: str) -> str:
+    """Scrape multiple URLs and return their readable content."""
 
-    try:
-        # Send HTTP request with a browser-like User-Agent
-        response = requests.get(
-            url,
-            timeout=8,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
+    results = []
 
-        response.raise_for_status()
+    for i, url in enumerate(
+        urls.splitlines(),
+        start=1
+    ):
+        url = url.strip()
 
-        # Parse the webpage HTML
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser"
-        )
+        if not url:
+            continue
 
-        # Remove elements that are not part of the main content
-        for tag in soup([
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header",
-            "aside"
-        ]):
-            tag.decompose()
+        try:
+            response = requests.get(
+                url,
+                timeout=8,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
 
-        # Extract clean text from the webpage
-        text = soup.get_text(
-            separator=" ",
-            strip=True
-        )
+            response.raise_for_status()
 
-        # Limit the text sent to the LLM
-        return text[:3000]
+            soup = BeautifulSoup(
+                response.text,
+                "html.parser"
+            )
 
-    except Exception as e:
-        return f"Could not scrape URL: {str(e)}"
+            for tag in soup([
+                "script",
+                "style",
+                "nav",
+                "footer",
+                "header",
+                "aside"
+            ]):
+                tag.decompose()
 
+            text = soup.get_text(
+                separator=" ",
+                strip=True
+            )
+
+            results.append(
+                f"SOURCE_{i}\n"
+                f"URL: {url}\n"
+                f"CONTENT:\n{text[:3000]}"
+            )
+
+        except Exception as e:
+            results.append(
+                f"SOURCE_{i}\n"
+                f"URL: {url}\n"
+                f"ERROR: {str(e)}"
+            )
+
+    if not results:
+        return "No sources could be scraped."
+
+    return "\n\n====================\n\n".join(results)

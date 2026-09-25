@@ -11,48 +11,24 @@ from agents import (
 # ============================================================
 
 def extract_text(response):
-    """
-    Convert LangChain / Gemini structured responses
-    into clean plain text.
-    """
+    """Convert LangChain / Gemini responses into clean text."""
 
     if response is None:
         return ""
 
-    # --------------------------------------------------------
-    # Case 1: Already a normal string
-    # --------------------------------------------------------
-
     if isinstance(response, str):
         return response
-
-    # --------------------------------------------------------
-    # Case 2: LangChain AIMessage / HumanMessage
-    # --------------------------------------------------------
 
     if hasattr(response, "content"):
         return extract_text(response.content)
 
-    # --------------------------------------------------------
-    # Case 3: Dictionary
-    # --------------------------------------------------------
-
     if isinstance(response, dict):
-
-        # Example:
-        # {"type": "text", "text": "some text"}
 
         if "text" in response:
             return str(response["text"])
 
-        # Example:
-        # {"content": "some text"}
-
         if "content" in response:
             return extract_text(response["content"])
-
-        # Example:
-        # Agent result containing messages
 
         if "messages" in response:
             messages = response["messages"]
@@ -62,27 +38,20 @@ def extract_text(response):
 
         return str(response)
 
-    # --------------------------------------------------------
-    # Case 4: List of Gemini content blocks
-    # --------------------------------------------------------
-
     if isinstance(response, list):
 
         text_parts = []
 
         for item in response:
 
-            # Plain string
             if isinstance(item, str):
                 text_parts.append(item)
 
-            # Gemini content block
             elif isinstance(item, dict):
 
                 if "text" in item:
                     text_parts.append(str(item["text"]))
 
-            # Another LangChain message
             elif hasattr(item, "content"):
                 text_parts.append(
                     extract_text(item.content)
@@ -90,11 +59,30 @@ def extract_text(response):
 
         return "\n\n".join(text_parts)
 
-    # --------------------------------------------------------
-    # Fallback
-    # --------------------------------------------------------
-
     return str(response)
+
+
+# ============================================================
+# URL EXTRACTOR
+# ============================================================
+
+def extract_urls(search_results):
+    """Extract unique URLs from Search Agent output."""
+
+    urls = []
+
+    for line in search_results.splitlines():
+
+        line = line.strip()
+
+        if line.startswith("URL:"):
+
+            url = line.replace("URL:", "", 1).strip()
+
+            if url and url not in urls:
+                urls.append(url)
+
+    return urls
 
 
 # ============================================================
@@ -103,7 +91,6 @@ def extract_text(response):
 
 def run_research_pipeline(topic: str) -> dict:
 
-    # Dictionary containing every pipeline output
     state = {}
 
 
@@ -115,31 +102,36 @@ def run_research_pipeline(topic: str) -> dict:
     print("STEP 1 - SEARCH AGENT")
     print("=" * 60)
 
-    print("\nSearching the web...")
+    print("\nSearching multiple sources...")
 
-    # Create Search Agent
     search_agent = build_search_result()
 
-    # Ask Search Agent to research the topic
     search_result = search_agent.invoke(
         {
             "messages": [
                 (
                     "user",
                     f"""
-Find recent, reliable and detailed information about:
+Find multiple recent, reliable and relevant sources
+about the following research topic:
 
 {topic}
 
-Use reliable sources and provide useful factual information
-for a research report.
+Return at least 4-5 useful sources.
+
+For every source provide:
+
+- Source title
+- URL
+- Short description of why it is relevant
+
+Prefer reliable and authoritative sources.
 """
                 )
             ]
         }
     )
 
-    # Extract only clean text
     state["search_results"] = extract_text(
         search_result["messages"][-1]
     )
@@ -149,48 +141,101 @@ for a research report.
 
 
     # ========================================================
-    # STEP 2 — READER AGENT
+    # STEP 2 — EXTRACT MULTIPLE SOURCE URLs
     # ========================================================
 
     print("\n" + "=" * 60)
-    print("STEP 2 - READER AGENT")
+    print("STEP 2 - SOURCE SELECTION")
     print("=" * 60)
 
-    print("\nReading and scraping relevant sources...")
+    urls = extract_urls(
+        state["search_results"]
+    )
 
-    # Create Reader Agent
+    # Use maximum 3 sources for scraping
+    selected_urls = urls[:3]
+
+    if not selected_urls:
+        raise ValueError(
+            "No valid source URLs found in search results."
+        )
+
+    print("\nSelected sources:")
+
+    for i, url in enumerate(
+        selected_urls,
+        start=1
+    ):
+        print(f"{i}. {url}")
+
+
+    # ========================================================
+    # STEP 3 — MULTI-SOURCE READER AGENT
+    # ========================================================
+
+    print("\n" + "=" * 60)
+    print("STEP 3 - MULTI-SOURCE READER AGENT")
+    print("=" * 60)
+
+    print("\nReading multiple sources...")
+
     reader_agent = build_reader_agent()
 
-    # Give Search Agent output to Reader Agent
+    urls_text = "\n".join(
+        selected_urls
+    )
+
     reader_prompt = f"""
 You are a research reader agent.
 
 Research topic:
-{topic}
-
-Below are the search results collected by another agent:
-
---------------------------------------------------
-SEARCH RESULTS
---------------------------------------------------
-
-{state["search_results"][:4000]}
-
---------------------------------------------------
-
-Your task:
-
-1. Identify the most relevant source or URL.
-2. Use the available scraping/web tool.
-3. Read the source carefully.
-4. Extract important factual information.
-5. Return a clean summary of the useful content.
-6. Do not return Python objects, metadata, signatures,
-   or unnecessary tool information.
-
-Focus only on information useful for answering:
 
 {topic}
+
+The Search Agent selected these sources:
+
+{urls_text}
+
+Use the available multi-source scraping tool to
+scrape and read ALL of these URLs.
+
+Do not skip a source unless it cannot be accessed.
+
+After scraping, extract the most important factual
+information from each source.
+
+Keep the sources clearly separated.
+
+Return the result in this format:
+
+SOURCE 1
+URL: ...
+Key Evidence:
+- ...
+- ...
+- ...
+
+SOURCE 2
+URL: ...
+Key Evidence:
+- ...
+- ...
+- ...
+
+SOURCE 3
+URL: ...
+Key Evidence:
+- ...
+- ...
+- ...
+
+Requirements:
+
+- Use all accessible sources
+- Do not invent information
+- Keep source URLs
+- Focus only on information relevant to the topic
+- Ignore irrelevant content
 """
 
     reader_result = reader_agent.invoke(
@@ -204,26 +249,24 @@ Focus only on information useful for answering:
         }
     )
 
-    # Extract clean text
     state["scraped_content"] = extract_text(
         reader_result["messages"][-1]
     )
 
-    print("\nSCRAPED CONTENT:\n")
+    print("\nMULTI-SOURCE CONTENT:\n")
     print(state["scraped_content"])
 
 
     # ========================================================
-    # STEP 3 — WRITER CHAIN
+    # STEP 4 — WRITER CHAIN
     # ========================================================
 
     print("\n" + "=" * 60)
-    print("STEP 3 - WRITER CHAIN")
+    print("STEP 4 - WRITER CHAIN")
     print("=" * 60)
 
     print("\nGenerating research report...")
 
-    # Combine all research
     research_combined = f"""
 RESEARCH TOPIC:
 {topic}
@@ -233,11 +276,10 @@ SEARCH RESULTS:
 {state["search_results"]}
 
 
-DETAILED SCRAPED CONTENT:
+MULTI-SOURCE EVIDENCE:
 {state["scraped_content"]}
 """
 
-    # Generate report
     writer_result = writer_chain.invoke(
         {
             "topic": topic,
@@ -245,7 +287,6 @@ DETAILED SCRAPED CONTENT:
         }
     )
 
-    # Convert AIMessage / structured response to text
     state["report"] = extract_text(
         writer_result
     )
@@ -255,23 +296,21 @@ DETAILED SCRAPED CONTENT:
 
 
     # ========================================================
-    # STEP 4 — CRITIC CHAIN
+    # STEP 5 — CRITIC CHAIN
     # ========================================================
 
     print("\n" + "=" * 60)
-    print("STEP 4 - CRITIC CHAIN")
+    print("STEP 5 - CRITIC CHAIN")
     print("=" * 60)
 
     print("\nReviewing research report...")
 
-    # Send report to critic
     critic_result = critic_chain.invoke(
         {
             "report": state["report"]
         }
     )
 
-    # Convert response to clean text
     state["feedback"] = extract_text(
         critic_result
     )
@@ -285,7 +324,7 @@ DETAILED SCRAPED CONTENT:
     # ========================================================
 
     print("\n" + "=" * 60)
-    print("RESEARCH PIPELINE COMPLETED")
+    print("MULTI-SOURCE RESEARCH PIPELINE COMPLETED")
     print("=" * 60)
 
     return state
@@ -322,7 +361,7 @@ if __name__ == "__main__":
         print("\n\nSEARCH RESULTS:")
         print(result["search_results"])
 
-        print("\n\nSCRAPED CONTENT:")
+        print("\n\nMULTI-SOURCE CONTENT:")
         print(result["scraped_content"])
 
         print("\n\nFINAL REPORT:")
