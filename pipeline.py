@@ -1,3 +1,5 @@
+import time
+
 from agents import (
     build_reader_agent,
     build_search_result,
@@ -67,20 +69,28 @@ def extract_text(response):
 # ============================================================
 
 def extract_urls(search_results):
-    """Extract unique URLs from Search Agent output."""
+    """Extract unique HTTP/HTTPS URLs from Search Agent output."""
+
+    import re
+
+    if not search_results:
+        return []
+
+    # Find URLs regardless of Search Agent formatting
+    found_urls = re.findall(
+        r'https?://[^\s<>"\]\)]+',
+        search_results
+    )
 
     urls = []
 
-    for line in search_results.splitlines():
+    for url in found_urls:
 
-        line = line.strip()
+        # Remove common punctuation accidentally attached to URLs
+        url = url.rstrip(".,;:!?")
 
-        if line.startswith("URL:"):
-
-            url = line.replace("URL:", "", 1).strip()
-
-            if url and url not in urls:
-                urls.append(url)
+        if url and url not in urls:
+            urls.append(url)
 
     return urls
 
@@ -151,6 +161,14 @@ Prefer reliable and authoritative sources.
     urls = extract_urls(
         state["search_results"]
     )
+
+    print("\nExtracted URLs:")
+
+    for i, url in enumerate(
+        urls,
+        start=1
+    ):
+        print(f"{i}. {url}")
 
     # Use maximum 3 sources for scraping
     selected_urls = urls[:3]
@@ -280,12 +298,56 @@ MULTI-SOURCE EVIDENCE:
 {state["scraped_content"]}
 """
 
-    writer_result = writer_chain.invoke(
-        {
-            "topic": topic,
-            "research": research_combined
-        }
-    )
+
+    # ========================================================
+    # WRITER WITH RETRY
+    # ========================================================
+
+    writer_result = None
+
+    for attempt in range(3):
+
+        try:
+
+            print(
+                f"\nWriter attempt {attempt + 1}/3..."
+            )
+
+            writer_result = writer_chain.invoke(
+                {
+                    "topic": topic,
+                    "research": research_combined
+                }
+            )
+
+            print("\nWriter completed successfully.")
+
+            break
+
+        except Exception as e:
+
+            print(
+                f"\nWriter attempt {attempt + 1} failed:"
+            )
+
+            print(e)
+
+            if attempt < 2:
+
+                print(
+                    "\nGemini temporarily unavailable."
+                    " Retrying in 5 seconds..."
+                )
+
+                time.sleep(5)
+
+            else:
+
+                raise RuntimeError(
+                    "Writer Chain failed after 3 attempts. "
+                    "Gemini API may be temporarily unavailable."
+                ) from e
+
 
     state["report"] = extract_text(
         writer_result
@@ -369,3 +431,4 @@ if __name__ == "__main__":
 
         print("\n\nCRITIC REVIEW:")
         print(result["feedback"])
+
